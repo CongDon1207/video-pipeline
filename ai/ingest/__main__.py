@@ -72,6 +72,14 @@ def main():
 
     # Tracking
     ap.add_argument("--track", type=int, default=safe_int_env("ENABLE_TRACK", "1"), help="Bật tracking (1/0)")
+    # DeepSORT tuning
+    ap.add_argument("--track_max_age", type=int, default=safe_int_env("TRACK_MAX_AGE", "30"), help="Frames giữ track khi bị mất (max_age)")
+    ap.add_argument("--track_n_init", type=int, default=safe_int_env("TRACK_N_INIT", "3"), help="Số lần hit để xác nhận track (n_init)")
+    ap.add_argument("--track_iou", type=float, default=safe_float_env("TRACK_IOU", "0.7"), help="Ngưỡng IoU cho matching (max_iou_distance)")
+    ap.add_argument("--track_nms_overlap", type=float, default=safe_float_env("TRACK_NMS_OVERLAP", "1.0"), help="NMS max overlap trong tracker")
+    ap.add_argument("--track_embedder", type=str, default=os.getenv("TRACK_EMBEDDER", "mobilenet"), help="Loại embedder appearance (vd: mobilenet)")
+    ap.add_argument("--track_embedder_gpu", type=int, default=safe_int_env("TRACK_EMBEDDER_GPU", "0"), help="Dùng GPU cho embedder (1/0)")
+    ap.add_argument("--track_half", type=int, default=safe_int_env("TRACK_EMBEDDER_HALF", "0"), help="FP16 cho embedder (1/0)")
 
     # Emit NDJSON (detection per-frame) & metadata nguồn
     ap.add_argument("--emit", type=str, default="none", choices=["none", "detection"], help="Kiểu dữ liệu xuất NDJSON")
@@ -89,7 +97,15 @@ def main():
     if args.track:
         try:
             from ai.track.deepsort_tracker import DeepSortTracker
-            tracker = DeepSortTracker(embedder_gpu=False, half=False)
+            tracker = DeepSortTracker(
+                max_age=args.track_max_age,
+                n_init=args.track_n_init,
+                max_iou_distance=args.track_iou,
+                nms_max_overlap=args.track_nms_overlap,
+                embedder=args.track_embedder,
+                embedder_gpu=bool(args.track_embedder_gpu),
+                half=bool(args.track_half),
+            )
         except Exception as e:
             print("[ERROR] Không khởi tạo được DeepSORT. Hãy cài đặt deep-sort-realtime: 'pip install deep-sort-realtime'.")
             print(f"Chi tiết: {e}")

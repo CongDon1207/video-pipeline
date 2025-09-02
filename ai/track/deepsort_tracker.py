@@ -46,29 +46,83 @@ class DeepSortTracker:
         )
 
     def update(self, detections: List[BBox], frame: np.ndarray | None = None) -> List[Tuple[int, int, int, int, int, float, str]]:
-        # Convert xyxy to ltwh
+        # Convert xyxy detections to DeepSORT expected ltwh
         raw = []
         for x1, y1, x2, y2, conf, _cls_id, cls_name in detections:
             w = max(0, int(x2 - x1))
             h = max(0, int(y2 - y1))
             raw.append(([int(x1), int(y1), w, h], float(conf), str(cls_name)))
 
+        # Update the underlying DeepSort tracker
         tracks = self.tracker.update_tracks(raw, frame=frame)
-        out: List[Tuple[int, int, int, int, int, float, str]] = []
+
+        # Build an alignment from detections -> track_id by IoU with original det bboxes
+        def iou(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> float:
+            ax1, ay1, ax2, ay2 = a
+            bx1, by1, bx2, by2 = b
+            ix1 = max(ax1, bx1)
+            iy1 = max(ay1, by1)
+            ix2 = min(ax2, bx2)
+            iy2 = min(ay2, by2)
+            iw = max(0, ix2 - ix1)
+            ih = max(0, iy2 - iy1)
+            inter = iw * ih
+            if inter <= 0:
+                return 0.0
+            area_a = max(0, ax2 - ax1) * max(0, ay2 - ay1)
+            area_b = max(0, bx2 - bx1) * max(0, by2 - by1)
+            union = area_a + area_b - inter
+            if union <= 0:
+                return 0.0
+            return inter / union
+
+        det_xyxy = [
+            (int(x1), int(y1), int(x2), int(y2)) for (x1, y1, x2, y2, _c, _id, _n) in detections
+        ]
+
+        # For current frame, many tracks may be unconfirmed; only consider confirmed tracks with an original bbox
+        candidates: list[tuple[int, Tuple[int, int, int, int], str, float]] = []
         for t in tracks:
-            # Some tracks may be unconfirmed; we keep only confirmed tracks with a bbox
             if hasattr(t, "is_confirmed") and not t.is_confirmed():
                 continue
+            # Prefer original detection bbox for this frame to align back to dets
+            orig = None
             if hasattr(t, "to_ltrb"):
-                l, t_, r, b = t.to_ltrb()
-            elif hasattr(t, "to_tlbr"):
-                l, t_, r, b = t.to_tlbr()
-            else:
+                orig = t.to_ltrb(orig=True, orig_strict=True)
+            if orig is None and hasattr(t, "to_tlbr"):
+                orig = t.to_tlbr()
+            if orig is None:
                 continue
-            track_id = getattr(t, "track_id", -1)
-            # DeepSORT does not retain original det confidence per track, set to 1.0 or best available
-            conf = float(getattr(t, "det_confidence", 1.0) or 1.0)
-            # Try to keep class name from first associated detection if available
-            cls_name = getattr(t, "det_class", None) or "object"
-            out.append((int(l), int(t_), int(r), int(b), int(track_id), conf, str(cls_name)))
-        return out
+            l, t_, r, b = [int(v) for v in orig]
+            tid = int(getattr(t, "track_id", -1))
+            cls_name = str(getattr(t, "det_class", None) or "object")
+            conf = float(getattr(t, "det_conf", 1.0) or 1.0)
+            candidates.append((tid, (l, t_, r, b), cls_name, conf))
+
+        # Map each detection to best matching track by IoU
+        assigned = [-1] * len(det_xyxy)
+        assigned_meta: list[tuple[str, float]] = [("object", 1.0)] * len(det_xyxy)
+        for i, dbox in enumerate(det_xyxy):
+            best_iou = 0.0
+            best_tid = -1
+            best_meta = ("object", 1.0)
+            for tid, tbox, cname, cconf in candidates:
+                v = iou(dbox, tbox)
+                if v > best_iou:
+                    best_iou = v
+                    best_tid = tid
+                    best_meta = (cname, cconf)
+            # Consider a valid match only if IoU is reasonably high
+            if best_iou >= 0.5 and best_tid > 0:
+                assigned[i] = best_tid
+                assigned_meta[i] = best_meta
+
+        # Return list aligned with detections length for downstream emitter
+        aligned: List[Tuple[int, int, int, int, int, float, str]] = []
+        for (x1, y1, x2, y2, conf, _cls_id, cls_name), tid, meta in zip(detections, assigned, assigned_meta):
+            cname, tconf = meta
+            # Keep the original det class name if present
+            out_name = cls_name or cname
+            track_id = int(tid) if tid is not None else -1
+            aligned.append((int(x1), int(y1), int(x2), int(y2), track_id, float(conf if conf is not None else tconf), str(out_name)))
+        return aligned

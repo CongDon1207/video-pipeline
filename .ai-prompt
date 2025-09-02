@@ -28,7 +28,7 @@ Hành vi khi chạy lệnh
 - Không commit; không cài thêm thư viện trừ khi bắt buộc để hoàn thành fix.
 - Khi gặp lỗi quyền/thiếu tài nguyên: báo rõ và đề xuất bước thủ công an toàn.
 - Mỗi lần sửa đổi lớn cần Kill process cũ → restart server mới
-- Sau khi sửa đổi hoàn tất nên kill các terminal hiện tại
+
 Định dạng câu trả lời
 - Ngôn ngữ trả lời là tiếng việt (vietnamese)
 - Tiêu đề ngắn (nếu cần); giọng văn ngắn gọn, chủ động.
