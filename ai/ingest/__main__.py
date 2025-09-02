@@ -1,4 +1,8 @@
-# ai/ingest/__main__.py
+"""
+CLI điều phối ingest -> detect -> track -> emit.
+Hỗ trợ backend GStreamer (mặc định) và fallback OpenCV, tracker DeepSORT hoặc Simple.
+"""
+
 import os
 import time
 import uuid
@@ -6,7 +10,15 @@ import argparse
 from datetime import datetime, timezone
 
 import cv2
-from .gst_source import GstSource
+
+try:
+    from .gst_source import GstSource  # type: ignore
+    _GST_AVAILABLE = True
+except Exception:
+    GstSource = None  # type: ignore
+    _GST_AVAILABLE = False
+
+from .cv_source import CvSource
 
 
 def _maybe_init_detector(args):
@@ -21,28 +33,33 @@ def main():
     ap = argparse.ArgumentParser()
     # Ingest & hiển thị
     ap.add_argument("--src", required=True, help="Đường dẫn file hoặc RTSP URL")
+    ap.add_argument(
+        "--backend",
+        type=str,
+        choices=["gst", "cv"],
+        default=os.getenv("INGEST_BACKEND", "gst"),
+        help="Chọn backend đọc video: gst (GStreamer) hoặc cv (OpenCV)",
+    )
     ap.add_argument("--display", type=int, default=int(os.getenv("DISPLAY", "1")), help="Hiển thị preview (1/0)")
     ap.add_argument("--fps_log", type=int, default=int(os.getenv("FPS_LOG_INTERVAL", "30")), help="Chu kỳ log FPS")
 
     # YOLO (detect)
-    ap.add_argument("--yolo", type=int, default=0, help="Bật YOLO detect (1/0)")
+    ap.add_argument("--yolo", type=int, default=1, help="Bật YOLO detect (1/0)")
     ap.add_argument("--model", type=str, default=os.getenv("YOLO_MODEL", "yolov8n.pt"), help="Model YOLOv8")
     ap.add_argument("--conf", type=float, default=float(os.getenv("YOLO_CONF", "0.25")), help="Ngưỡng confidence")
-    ap.add_argument("--classes", type=str, default=os.getenv("YOLO_CLASSES", "person"),
-                    help="Lọc class, ví dụ: 'person,bag'")
+    ap.add_argument(
+        "--classes",
+        type=str,
+        default=os.getenv("YOLO_CLASSES", "person"),
+        help="Lọc class, ví dụ: 'person,bag'",
+    )
 
     # Tracking
-    ap.add_argument("--track", type=int, default=0, help="Bật tracking (1/0). Bước sau có thể đổi sang ByteTrack.")
-    ap.add_argument("--iou", type=float, default=float(os.getenv("TRACK_IOU", "0.3")),
-                    help="Ngưỡng IOU cho SimpleTracker")
-    ap.add_argument("--ttl", type=int, default=int(os.getenv("TRACK_TTL", "30")),
-                    help="Số khung giữ track nếu mất mục tiêu")
+    ap.add_argument("--track", type=int, default=int(os.getenv("ENABLE_TRACK", "1")), help="Bật tracking (1/0)")
 
     # Emit NDJSON (detection per-frame) & metadata nguồn
-    ap.add_argument("--emit", type=str, default="none", choices=["none", "detection"],
-                    help="Kiểu dữ liệu xuất NDJSON")
-    ap.add_argument("--out", type=str, default="-",
-                    help="Đường dẫn file NDJSON (mặc định '-' = stdout)")
+    ap.add_argument("--emit", type=str, default="none", choices=["none", "detection"], help="Kiểu dữ liệu xuất NDJSON")
+    ap.add_argument("--out", type=str, default="-", help="Đường dẫn file NDJSON (mặc định '-' = stdout)")
     ap.add_argument("--store_id", type=str, default=os.getenv("STORE_ID", "store_01"))
     ap.add_argument("--camera_id", type=str, default=os.getenv("CAMERA_ID", "cam_01"))
     ap.add_argument("--stream_id", type=str, default=os.getenv("STREAM_ID", "stream_01"))
@@ -54,22 +71,37 @@ def main():
     det = _maybe_init_detector(args)
     tracker = None
     if args.track:
-        from ai.track.simple_tracker import SimpleTracker
-        tracker = SimpleTracker(iou_thresh=args.iou, max_ttl=args.ttl)
+        try:
+            from ai.track.deepsort_tracker import DeepSortTracker
+            tracker = DeepSortTracker(embedder_gpu=False, half=False)
+        except Exception as e:
+            print("[ERROR] Không khởi tạo được DeepSORT. Hãy cài đặt deep-sort-realtime: 'pip install deep-sort-realtime'.")
+            print(f"Chi tiết: {e}")
+            raise SystemExit(2)
 
     # Emitter NDJSON
     emitter = None
     if args.emit != "none":
-        from ai.emit.json_emitter import JsonEmitter  # yêu cầu file ai/emit/json_emitter.py
+        from ai.emit.json_emitter import JsonEmitter
+
         emitter = JsonEmitter(out_path=args.out)
 
     pipeline_run_id = args.run_id if args.run_id else uuid.uuid4().hex
     source_info = {"store_id": args.store_id, "camera_id": args.camera_id, "stream_id": args.stream_id}
 
     # Mở nguồn video
-    src = GstSource(args.src)
+    backend = args.backend
+    if backend == "gst" and not _GST_AVAILABLE:
+        print("[WARN] GStreamer backend không sẵn sàng (thiếu gi). Tự động chuyển sang OpenCV.")
+        backend = "cv"
+
+    if backend == "gst":
+        src = GstSource(args.src)  # type: ignore
+    else:
+        src = CvSource(args.src)
+
     if not src.open():
-        print(f"[ERROR] Không mở được nguồn: {args.src}")
+        print(f"[ERROR] Không mở được nguồn: {args.src} (backend={backend})")
         raise SystemExit(2)
 
     t0 = time.time()
@@ -93,7 +125,7 @@ def main():
                 det_total += len(dets)
 
                 if tracker:
-                    tracked = tracker.update(dets)  # [(x1,y1,x2,y2,tid,conf,cls)]
+                    tracked = tracker.update(dets, frame)  # [(x1,y1,x2,y2,tid,conf,cls)]
                 else:
                     tracked = [(x1, y1, x2, y2, -1, conf, cls) for (x1, y1, x2, y2, conf, _, cls) in dets]
 
@@ -103,8 +135,16 @@ def main():
                         color = (0, 255, 0) if tid > 0 else (255, 0, 0)
                         label = f"{'ID'+str(tid)+':' if tid>0 else ''}{name}:{cf:.2f}"
                         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                        cv2.putText(frame, label, (x1, max(0, y1 - 5)),
-                                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+                        cv2.putText(
+                            frame,
+                            label,
+                            (x1, max(0, y1 - 5)),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.5,
+                            color,
+                            1,
+                            cv2.LINE_AA,
+                        )
 
             # Emit NDJSON (detection per-frame)
             if emitter and det is not None:
@@ -118,13 +158,13 @@ def main():
                     capture_ts=capture_ts,
                     image_size=(w, h),
                     dets=dets,
-                    tracked=tracked if tracker else None
+                    tracked=tracked if tracker else None,
                 )
 
             # Hiển thị
             if args.display:
                 cv2.imshow(win, frame)
-                if cv2.waitKey(1) & 0xFF == ord('q'):
+                if cv2.waitKey(1) & 0xFF == ord("q"):
                     print("[INFO] Quit by user.")
                     break
 
@@ -134,7 +174,10 @@ def main():
                 h, w = frame.shape[:2]
                 extra = ""
                 if det is not None:
-                    active_tracks = len(tracker.tracks) if tracker else 0
+                    active_tracks = 0
+                    if tracker is not None:
+                        if hasattr(tracker, "tracker") and hasattr(tracker.tracker, "tracks"):
+                            active_tracks = len(tracker.tracker.tracks)
                     extra = f" | det_total={det_total}" + (f" | active_tracks={active_tracks}" if tracker else "")
                 print(f"[INFO] Frames={frames} | Res={w}x{h} | ~{fps:.1f} FPS{extra}")
 
