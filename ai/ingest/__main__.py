@@ -11,6 +11,22 @@ from datetime import datetime, timezone
 
 import cv2
 
+
+def safe_int_env(env_var: str, default: str) -> int:
+    """Parse env var to int safely, return default if invalid."""
+    try:
+        return int(os.getenv(env_var, default))
+    except ValueError:
+        return int(default)
+
+
+def safe_float_env(env_var: str, default: str) -> float:
+    """Parse env var to float safely, return default if invalid."""
+    try:
+        return float(os.getenv(env_var, default))
+    except ValueError:
+        return float(default)
+
 try:
     from .gst_source import GstSource  # type: ignore
     _GST_AVAILABLE = True
@@ -40,13 +56,13 @@ def main():
         default=os.getenv("INGEST_BACKEND", "gst"),
         help="Chọn backend đọc video: gst (GStreamer) hoặc cv (OpenCV)",
     )
-    ap.add_argument("--display", type=int, default=int(os.getenv("DISPLAY", "1")), help="Hiển thị preview (1/0)")
-    ap.add_argument("--fps_log", type=int, default=int(os.getenv("FPS_LOG_INTERVAL", "30")), help="Chu kỳ log FPS")
+    ap.add_argument("--display", type=int, default=safe_int_env("DISPLAY", "1"), help="Hiển thị preview (1/0)")
+    ap.add_argument("--fps_log", type=int, default=safe_int_env("FPS_LOG_INTERVAL", "30"), help="Chu kỳ log FPS")
 
     # YOLO (detect)
     ap.add_argument("--yolo", type=int, default=1, help="Bật YOLO detect (1/0)")
     ap.add_argument("--model", type=str, default=os.getenv("YOLO_MODEL", "yolov8n.pt"), help="Model YOLOv8")
-    ap.add_argument("--conf", type=float, default=float(os.getenv("YOLO_CONF", "0.25")), help="Ngưỡng confidence")
+    ap.add_argument("--conf", type=float, default=safe_float_env("YOLO_CONF", "0.25"), help="Ngưỡng confidence")
     ap.add_argument(
         "--classes",
         type=str,
@@ -55,7 +71,7 @@ def main():
     )
 
     # Tracking
-    ap.add_argument("--track", type=int, default=int(os.getenv("ENABLE_TRACK", "1")), help="Bật tracking (1/0)")
+    ap.add_argument("--track", type=int, default=safe_int_env("ENABLE_TRACK", "1"), help="Bật tracking (1/0)")
 
     # Emit NDJSON (detection per-frame) & metadata nguồn
     ap.add_argument("--emit", type=str, default="none", choices=["none", "detection"], help="Kiểu dữ liệu xuất NDJSON")

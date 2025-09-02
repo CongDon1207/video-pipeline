@@ -1,0 +1,71 @@
+MANDATORY AI WORKFLOW — PHẢI TUÂN THỦ 100%
+Mục tiêu
+- Sửa đúng yêu cầu, không làm ngoài phạm vi; ưu tiên giải pháp tối giản, rõ ràng, idempotent.
+- Chỉ sửa file cần thiết; không tạo file mới trừ khi bắt buộc và có lý do.
+Tài liệu phải đọc trước
+- `README.md`, `RULES.md`, các tài liệu trong `docs/*` liên quan (kiến trúc, data-flow, makefile-guide).
+- `Makefile`, `docker-compose*.yml`, các file `.env*` (chỉ để tham chiếu; không ghi đè).
+Quy trình trả lời (áp dụng cho mọi response)
+- Requirement: trích 1–2 dòng nêu lại chính xác yêu cầu của user.
+- Plan: 2–3 bước ngắn, theo thứ tự hợp lý.
+- Changes: nêu file đã sửa với vị trí `path:line`; patch tối thiểu; không đổi kiến trúc/pattern.
+- Test: lệnh kiểm tra và tiêu chí pass; nêu rõ có cần restart service không và lý do.
+- Result: tóm tắt thay đổi, nguyên nhân gốc và trạng thái sau khi fix.
+Ràng buộc
+- Không thêm file trừ khi bắt buộc; nếu thêm, nêu rõ lý do và file cũ cần xóa/thay thế.
+- Không thay đổi kiến trúc/pattern nếu không thực sự cần thiết.
+- Patch >300 dòng: tạm dừng và đề xuất phương án tách/refactor trước khi tiếp tục.
+- Ngôn ngữ trả lời: tiếng Việt; log/lỗi/command giữ nguyên ngữ cảnh để chính xác.
+- Ưu tiên giải pháp đơn giản đủ dùng, tái sử dụng code có sẵn, code phức tạp khi thực sự cần thiết
+- Không đụng vào code ngoài phạm vi
+- Tạo file mới khi thực sự cần thiết, và xóa các file không sử dụng nữa.
+- Ưu tiên sử dụng MCP khi thực sự cần thiết; chọn đúng server/tool; không gọi MCP khi không có lợi.
+- Không chỉnh sửa hoặc loại bỏ bất kỳ yêu cầu nào trong đề bài; giữ nguyên toàn bộ yêu cầu, kể cả yêu cầu tưởng “không liên quan”, trừ khi người dùng yêu cầu loại bỏ rõ ràng.
+- Không tự ý gom, lược hoặc tái diễn giải yêu cầu; nếu mơ hồ, đặt 1–2 câu hỏi chốt trước khi làm.
+Hành vi khi chạy lệnh   
+- Ưu tiên `rg` để tìm kiếm; đọc file theo khối ≤250 dòng/lần.
+- Chỉ chạy lệnh cần thiết; tránh lệnh nặng/kéo dài; không thao tác phá hủy (rm/reset) khi user không yêu cầu.
+- Không commit; không cài thêm thư viện trừ khi bắt buộc để hoàn thành fix.
+- Khi gặp lỗi quyền/thiếu tài nguyên: báo rõ và đề xuất bước thủ công an toàn.
+- Mỗi lần sửa đổi lớn cần Kill process cũ → restart server mới
+- Sau khi sửa đổi hoàn tất nên kill các terminal hiện tại
+Định dạng câu trả lời
+- Ngôn ngữ trả lời là tiếng việt (vietnamese)
+- Tiêu đề ngắn (nếu cần); giọng văn ngắn gọn, chủ động.
+- Bullets: từ khóa đậm, mô tả ngắn một dòng.
+- Dùng backticks cho lệnh, đường dẫn file, biến môi trường, identifier.
+- Trích dẫn file theo `path:line` (không dải dòng). Ví dụ: `influxdb/init/onboarding.sh:42`.
+- Không chèn ANSI/định dạng lạ; không trộn đậm với monospace.
+Definition of Done (DoD)
+- Đúng yêu cầu; không làm thêm; verify/test pass; không tạo thừa; không động `.env`.
+- Secrets an toàn; file >300 dòng đã cân nhắc tách; nêu nguyên nhân gốc và thay đổi đã làm.
+
+MCP Tooling Rules
+- Ưu tiên sử dụng MCP cho các tác vụ: tìm kiếm, đọc/ghi tệp, chạy lệnh, truy vấn nội bộ. Chỉ dùng công cụ khác khi MCP không đáp ứng và phải nêu lý do ngắn gọn.
+- Khi MCP không khả dụng/timeout/lỗi, ghi rõ nguyên nhân ngắn và đề xuất bước thủ công an toàn.
+- Nếu câu hỏi liên quan tới tài liệu/đoạn code, hãy gọi context7.search trước. Dùng top_k<=5, yêu cầu snippets ±3 câu và metadata. Không lấy full text.
+- Nếu cần tuỳ chọn (đường dẫn, repo, ruleset), đọc từ memory.get trước khi hỏi người dùng.
+- Với pipeline/kiểm tra đặc thù, gọi serena.* và yêu cầu trả JSON gọn (summary, next_actions).
+- Tóm tắt tool output ≤ 250 từ rồi mới suy luận; không dán nguyên văn dài.
+- Giới hạn token: input ≤ 3000, output ≤ 600. Nếu vượt, giảm top_k hoặc rút trích hẹp hơn.
+- Timeout tool 8s, 1 retry giảm top_k. Nếu vẫn lỗi: nêu ngắn gọn và đề xuất bước tiếp theo.
+- Không lưu secrets vào memory. Dùng memory cho context ngắn hạn; context7 cho tìm kiếm tài liệu.
+
+ - Quy tắc quyết định gọi MCP (cost-aware): gọi MCP chỉ khi cần tìm/đọc nội dung chưa có trong prompt, cần chạy lệnh/kiểm tra, hoặc cần xác thực giả định. Nếu chỉ tóm tắt từ cây đã cung cấp → không gọi.
+ - Giới hạn phạm vi để giảm token:
+	 - search: top_k≤5, truy vấn hẹp, chỉ lấy snippets ±3 câu + metadata; tránh full text.
+	 - read_file: dùng offset/limit, mỗi lần ≤250 dòng; đọc nhiều đoạn nhỏ thay vì full file.
+	 - lệnh/logs: thêm --no-pager, dùng tail/head/grep để lọc; không dump dài.
+ - Chống trùng lặp: không lặp lại nội dung đã có ở lượt trước; ưu tiên tham chiếu/tóm tắt ≤250 từ.
+ - Checkpoint sau 3–5 tool calls: tóm tắt ≤100 từ kết quả đã thu; nếu chưa đủ, thu hẹp từ khóa/đường dẫn rồi mới gọi tiếp.
+ - Ngắt/thu nhỏ khi dự đoán vượt hạn mức: nếu input >3000 hoặc output >600 tokens, chia nhỏ truy vấn hoặc giảm top_k trước khi tiếp tục.
+
+Hỏi lại khi mơ hồ
+- Nếu thiếu thông tin (org/bucket/token, endpoint, điều kiện test…), đặt 1–2 câu hỏi chốt trước khi thay đổi.
+- Yêu cầu tôi cung cấp thông tin cần thiết để làm tiếp. Không phỏng đoán.
+Ví dụ khung trả lời
+- Requirement: “…”
+- Plan: 1) … 2) … 3) …
+- Changes: sửa `path:line` …; lý do …
+- Test: chạy `command`; kỳ vọng …
+- Result: pass/fail + nguyên nhân gốc
