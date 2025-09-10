@@ -31,6 +31,10 @@ ai/
 ## 🔧 Cài đặt môi trường
 
 **Python 3.12** (khuyến nghị trên Windows):
+```bash
+py -3.12 -m venv .venv312
+. .venv312/Scripts/activate
+```
 
 ```bash
 # Cài dependencies chính
@@ -39,6 +43,59 @@ py -3.12 -m pip install ultralytics opencv-python deep-sort-realtime
 
 # Kiểm tra cài đặt
 py -3.12 -m pip list | grep -E "(ultralytics|opencv|deep-sort)"
+```
+## 🔧 Cài đặt môi trường
+
+**Python 3.12** (khuyến nghị trên Windows)
+
+1) Tạo virtual environment (venv)
+
+```bash
+py -3.12 -m venv .venv312
+```
+
+2) Kích hoạt venv — chọn lệnh phù hợp với shell bạn đang dùng:
+
+- cmd.exe (Command Prompt):
+
+```powershell
+.venv312\Scripts\activate.bat
+```
+
+- PowerShell:
+
+```powershell
+.venv312\Scripts\Activate.ps1
+```
+
+- Git Bash / WSL / bash.exe:
+
+```bash
+source .venv312/Scripts/activate
+```
+
+Lưu ý: nếu bạn không muốn/không thể kích hoạt venv, có thể chạy pip thông qua Python cụ thể:`py -3.12 -m pip ...`.
+
+3) Cài dependencies (chạy sau khi đã activate hoặc dùng `py -3.12 -m pip`)
+
+```bash
+# (sau khi đã activate) hoặc
+py -3.12 -m pip install --upgrade pip wheel setuptools
+py -3.12 -m pip install ultralytics opencv-python deep-sort-realtime
+```
+
+4) Kiểm tra cài đặt (tùy shell)
+
+- Trên bash (Git Bash / WSL):
+
+```bash
+py -3.12 -m pip list | grep -E "(ultralytics|opencv|deep-sort)"
+```
+
+- Trên Windows cmd / PowerShell (dùng findstr thay cho grep):
+
+```powershell
+py -3.12 -m pip list | findstr /R "ultralytics opencv deep-sort"
 ```
 
 ## 🚀 Cách chạy Pipeline từng bước
@@ -87,6 +144,15 @@ py -3.12 -m ai.ingest \
   --out detections_output.ndjson
 ```
 
+py -3.9 -m ai.ingest \
+  --backend cv \
+  --src "data/videos/video.mp4" \
+  --yolo 1 \
+  --track 1 \
+  --display 1 \
+  --emit detection \
+  --out detections_output.ndjson
+
 **Tham số bổ sung:**
 - `--emit detection`: Xuất detection metadata mỗi frame
 - `--out detections_output.ndjson`: File output chứa metadata
@@ -112,6 +178,21 @@ py -3.12 -m ai.ingest \
   --track_nms_overlap 0.9
 ```
 
+```bash
+py -3.12 -m ai.ingest \
+  --backend cv \
+  --src "data/videos/video.mp4" \
+  --yolo 1 \
+  --track 1 \
+  --display 1 \
+  --emit detection \
+  --out detections_midtown_t3.ndjson \
+  --conf 0.25 \
+  --track_max_age 90 \
+  --track_n_init 3 \
+  --track_iou 0.8 \
+  --track_nms_overlap 0.9
+```
 Kiểm tra kết quả NDJSON (số lượng ID duy nhất cho class person = 3):
 ```bash
 py -3.12 scripts\\analyze_ndjson.py detections_midtown_t3.ndjson
