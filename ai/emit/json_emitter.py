@@ -1,101 +1,105 @@
-# ai/emit/json_emitter.py
-import sys, json, uuid
-from datetime import datetime, timezone
-from typing import List, Dict, Tuple, Optional
+from __future__ import annotations
 
-Det = Tuple[int,int,int,int,float,int,str]       # (x1,y1,x2,y2,conf,cls_id,cls_name)
-Tracked = Tuple[int,int,int,int,int,float,str]   # (x1,y1,x2,y2,track_id,conf,cls_name)
+import json
+import sys
+from typing import Any, Dict, Iterable, Optional, TextIO, Tuple
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+
+# Dict chứa thông tin 1 detection: bbox, confidence, class_name, track_id, etc.
+DetectionDict = Dict[str, Any]
+
 
 class JsonEmitter:
-    def __init__(self, out_path: Optional[str] = None):
-        """
-        out_path: đường dẫn file NDJSON. Nếu None hoặc "-", ghi ra stdout.
-        """
+    """Ghi metadata detection/tracking dạng NDJSON."""
+
+    def __init__(self, out_path: str = "-") -> None:
         self.out_path = out_path
-        self._fh = None
-        if out_path and out_path != "-":
-            self._fh = open(out_path, "a", encoding="utf-8")
+        self._handle: Optional[TextIO] = None
+        self._open()
 
-    def close(self):
-        if self._fh:
-            self._fh.close()
-            self._fh = None
-
-    def _write_line(self, obj: Dict):
-        line = json.dumps(obj, ensure_ascii=False)
-        if self._fh:
-            self._fh.write(line + "\n")
-            self._fh.flush()
-        else:
-            sys.stdout.write(line + "\n")
-            sys.stdout.flush()
+    def _open(self) -> None:
+        """Mở file output hoặc dùng stdout"""
+        if self.out_path in ("-", "", None):
+            self._handle = sys.stdout
+            return
+        try:
+            self._handle = open(self.out_path, "w", encoding="utf-8")
+        except OSError as exc:
+            print(f"[WARN] Không mở được {self.out_path}: {exc}; ghi ra stdout")
+            self._handle = sys.stdout
 
     def emit_detection(
         self,
         *,
-        schema_version: str,
-        pipeline_run_id: str,
-        source: Dict,                     # {"store_id":..., "camera_id":..., "stream_id":...}
-        frame_index: int,
-        capture_ts: Optional[str],
-        image_size: Tuple[int,int],       # (w,h)
-        dets: List[Det],
-        tracked: Optional[List[Tracked]] = None
-    ):
+        schema_version: str,     # Version của JSON schema
+        pipeline_run_id: str,   # ID của pipeline run
+        source: Dict[str, str], # Metadata source (store_id, camera_id, etc.)
+        frame_index: int,       # Số thứ tự frame
+        capture_ts: str,        # Timestamp capture (ISO format)
+        image_size: Tuple[int, int],  # (width, height) của frame
+        detections: Iterable[DetectionDict],  # List detections trong frame
+    ) -> None:
         """
-        Ghi 1 bản ghi detection cho 1 frame. Nếu có 'tracked', sẽ điền track_id tương ứng.
+        Xuất detection data của 1 frame dạng NDJSON
         """
-        w, h = image_size
-        ts = capture_ts or _utc_now_iso()
+        if not self._handle:
+            return
 
-        detections = []
-        if tracked is not None and len(tracked) == len(dets):
-            # giả định output của tracker giữ thứ tự theo detections
-            for i, (d, t) in enumerate(zip(dets, tracked)):
-                x1, y1, x2, y2, conf, cls_id, cls_name = d
-                _, _, _, _, track_id, _, _ = t
-                detections.append({
-                    "det_id": f"{frame_index}-{i}",
-                    "class": cls_name,
-                    "class_id": int(cls_id),
-                    "conf": float(conf),
-                    "bbox": {"x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2)},
-                    "bbox_norm": {
-                        "x": float(x1)/max(1,w),
-                        "y": float(y1)/max(1,h),
-                        "w": float(x2 - x1)/max(1,w),
-                        "h": float(y2 - y1)/max(1,h),
-                    },
-                    "centroid": {"x": int((x1 + x2)//2), "y": int((y1 + y2)//2)},
-                    "track_id": int(track_id)
-                })
-        else:
-            for i, (x1, y1, x2, y2, conf, cls_id, cls_name) in enumerate(dets):
-                detections.append({
-                    "det_id": f"{frame_index}-{i}",
-                    "class": cls_name,
-                    "class_id": int(cls_id),
-                    "conf": float(conf),
-                    "bbox": {"x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2)},
-                    "bbox_norm": {
-                        "x": float(x1)/max(1,w),
-                        "y": float(y1)/max(1,h),
-                        "w": float(x2 - x1)/max(1,w),
-                        "h": float(y2 - y1)/max(1,h),
-                    },
-                    "centroid": {"x": int((x1 + x2)//2), "y": int((y1 + y2)//2)},
-                    "track_id": None
-                })
+        width, height = image_size
+        frame_payload = []
+        
+        # Process từng detection trong frame
+        for idx, det in enumerate(detections):
+            x1, y1, x2, y2 = det.get("bbox", (0, 0, 0, 0))
+            w = max(x2 - x1, 0)
+            h = max(y2 - y1, 0)
+            cx = x1 + w / 2.0  # Centroid X
+            cy = y1 + h / 2.0  # Centroid Y
+            
+            # Helper function normalize coordinates [0,1]
+            norm = lambda value, denom: value / denom if denom else 0.0
 
+            # Tạo detection record với đầy đủ metadata
+            frame_payload.append(
+                {
+                    "det_id": f"{frame_index}-{idx}",
+                    "class": det.get("class_name"),
+                    "class_id": det.get("class_id"),
+                    "conf": round(float(det.get("conf", 0.0)), 4),
+                    "bbox": {"x1": x1, "y1": y1, "x2": x2, "y2": y2},
+                    "bbox_norm": {  # Normalized bbox [0,1]
+                        "x": norm(x1, width),
+                        "y": norm(y1, height),
+                        "w": norm(w, width),
+                        "h": norm(h, height),
+                    },
+                    "centroid": {"x": int(round(cx)), "y": int(round(cy))},
+                    "centroid_norm": {"x": norm(cx, width), "y": norm(cy, height)},
+                    "track_id": det.get("track_id"),  # Track ID từ DeepSORT (nếu có)
+                }
+            )
+
+        # Tạo record JSON cho frame
         record = {
             "schema_version": schema_version,
             "pipeline_run_id": pipeline_run_id,
             "source": source,
-            "frame_index": int(frame_index),
-            "capture_ts": ts,
-            "detections": detections
+            "frame_index": frame_index,
+            "capture_ts": capture_ts,
+            "image_size": {"width": width, "height": height},
+            "detections": frame_payload,
         }
-        self._write_line(record)
+
+        # Ghi NDJSON (mỗi record 1 dòng)
+        try:
+            json.dump(record, self._handle, ensure_ascii=False)
+            self._handle.write("\n")
+            self._handle.flush()
+        except OSError as exc:
+            print(f"[WARN] Lỗi ghi JSON: {exc}")
+
+    def close(self) -> None:
+        """Đóng file output"""
+        if self._handle and self._handle is not sys.stdout:
+            self._handle.close()
+        self._handle = None

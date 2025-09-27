@@ -144,7 +144,7 @@ py -3.12 -m ai.ingest \
   --out detections_output.ndjson
 ```
 
-py -3.9 -m ai.ingest \
+py -3.12 -m ai.ingest \
   --backend cv \
   --src "data/videos/video.mp4" \
   --yolo 1 \
